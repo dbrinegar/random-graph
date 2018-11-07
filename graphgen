@@ -1,0 +1,101 @@
+#/bin/bash
+
+# print out a graph
+# visualize with:   | dot -Tps | open -f -a /Applications/Preview.app
+# flip cards: while : ; do ./graphgen | dot -Tps | open -f -W -a /Applications/Preview.app ; done
+
+SEED=$1
+if [[ -z $SEED ]]; then
+    # use a truly random seed
+    SEED=$(( $( od -A n -t uI -N 4 /dev/urandom ) ))
+fi
+awk -v seed=$SEED -f - <<EOF
+
+
+function pick_expo(N) {
+    return int(N * rand() * rand())
+}
+
+function pick(N) {
+    return int(N * rand())
+}
+
+BEGIN {
+    srand(seed)
+    print seed > "/dev/stderr"
+
+    printf("digraph {\nlandscape=true\nratio=fill\nrankdir=LR\n\n")
+
+    Ingresses = pick_expo(4) + 1
+    Egresses = pick_expo(4) + 1
+    MidNodes = pick(6)+1+pick(6)+1  # 2d6
+
+    MidNdx = Ingresses
+    EgressNdx = Ingresses + MidNodes
+    Total = Ingresses + MidNodes + Egresses
+
+    # each ingress must connect to one non-ingress
+    for (n = 0 ; n < Ingresses ; n++) {
+        reader = MidNdx + pick(MidNodes + Egresses)
+        Ins[reader] = 1
+        printf("s%d -> s%d\n", n, reader)
+        printf("s%d [style=filled, fillcolor=lightblue]\n", n)
+    }
+
+    # graphviz trick to mostly constrain these nodes to left
+    for (n = 0 ; n < Ingresses ; n++) {
+        for (i in Ins) {
+            printf("s%d -> s%d [style=invis]\n", n, i)
+        }
+    }
+
+    # each egress must connect to one non-egress
+    for (n = EgressNdx ; n < EgressNdx + Egresses; n++) {
+        printf("s%d [style=filled, fillcolor=lightblue]\n", n)
+        if (Ins[n] == 1) {
+            continue
+        }
+        writer = pick(MidNodes + Ingresses)
+        Outs[writer] = 1
+        printf("s%d -> s%d\n", writer, n)
+    }
+
+    # graphviz trick to mostly constrain these nodes to the right
+    for (n = EgressNdx ; n < EgressNdx + Egresses; n++) {
+        for (i in Outs) {
+            printf("s%d -> s%d [style=invis]\n", i, n)
+        }
+    }
+
+    # each midnode must have an in from smaller and an out to larger
+    for (n = MidNdx ; n < EgressNdx ; n++) {
+        if (!Ins[n]) {
+            writer = pick(n)
+            printf("s%d -> s%d\n", writer, n)
+            Outs[writer] = 1
+        }
+        if (!Outs[n]) {
+            reader = n+1+pick(Total - n - 2)
+            printf("s%d -> s%d\n", n, reader)
+            Ins[reader] = 1
+        }
+    }
+
+    # extra edges
+    extras = pick_expo(4)
+    for (i = 0 ; i < extras ; i++) {
+        n = pick(Total)
+        m = pick(Total)
+        if (n == m) continue
+        if (n > m) {
+            t=m
+            m=n
+            n=t
+        }
+        printf("s%d -> s%d\n", n, m)
+    }
+
+    printf("}\n")
+}
+
+EOF
